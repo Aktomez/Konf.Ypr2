@@ -1,0 +1,8 @@
+@startuml
+skinparam nodeStyle rectangle
+"A" --> "B"
+"A" --> "C"
+"B" --> "D"
+"D"
+"C"
+@enduml

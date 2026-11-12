@@ -114,7 +114,7 @@ def load_test_graph(file_path):
 
 
 def build_dependency_graph(start_package, base_url, test_mode, test_repo_path):
-    """Построение полного транзитивного графа зависимостей с помощью DFS (Этап 3)."""
+    """Построение полного транзитивного графа зависимостей с помощью DFS."""
     graph = {}
 
     if test_mode:
@@ -154,6 +154,53 @@ def build_dependency_graph(start_package, base_url, test_mode, test_repo_path):
     return graph
 
 
+def print_ascii_tree(graph, root, prefix=""):
+    """Печать дерева зависимостей в формате ASCII."""
+    print(f"{prefix}{root}")
+    children = graph.get(root, [])
+    for i, child in enumerate(children):
+        connector = "└── " if i == len(children) - 1 else "├── "
+        extension = "    " if i == len(children) - 1 else "│   "
+        if child in graph and prefix.count(child) < 1:
+            print_ascii_tree(graph, child, prefix + extension)
+        else:
+            print(f"{prefix}{extension}{connector}{child} (already visited)")
+
+
+def get_load_order(graph, root):
+    """Определение порядка загрузки зависимостей (Этап 4)."""
+    visited = set()
+    order = []
+
+    def dfs(node):
+        if node in visited:
+            return
+        visited.add(node)
+        for neighbor in graph.get(node, []):
+            dfs(neighbor)
+        order.append(node)
+
+    if root in graph:
+        dfs(root)
+    return order
+
+
+def generate_plantuml_graph(graph, output_path):
+    """Генерация текстового представления графа на языке PlantUML (Этап 5)."""
+    puml_content = "@startuml\n"
+    puml_content += "skinparam nodeStyle rectangle\n"
+    for parent, children in graph.items():
+        if not children:
+            puml_content += f"\"{parent}\"\n"
+        for child in children:
+            puml_content += f"\"{parent}\" --> \"{child}\"\n"
+    puml_content += "@enduml\n"
+
+    with open(output_path, "w", encoding="utf-8") as f:
+        f.write(puml_content)
+    print(f"PlantUML граф успешно сохранен в: {output_path}")
+
+
 def main():
     config_path = "config.yaml"
     if len(sys.argv) > 1:
@@ -170,13 +217,24 @@ def main():
     repo_url = config["repository_url"]
     test_mode = config["test_mode"]
     test_repo_path = config["test_repo_path"]
+    output_image = config["output_image"]
+    ascii_tree_enabled = config["ascii_tree"]
 
-    print(f"Построение графа зависимостей для '{package_name}' (Этап 3, test_mode={test_mode})...")
+    print(f"Построение графа для '{package_name}'...")
     graph = build_dependency_graph(package_name, repo_url, test_mode, test_repo_path)
 
-    print("\nПолученный граф зависимостей (список смежности):")
-    for node, deps in graph.items():
-        print(f" {node} -> {deps}")
+    if ascii_tree_enabled and package_name in graph:
+        print("\n--- Дерево зависимостей (ASCII) ---")
+        print_ascii_tree(graph, package_name)
+        print("-" * 30)
+
+    print("\n--- Порядок загрузки зависимостей (Этап 4) ---")
+    load_order = get_load_order(graph, package_name)
+    print(" -> ".join(load_order))
+    print("-" * 30)
+
+    if output_image:
+        generate_plantuml_graph(graph, output_image)
 
 
 if __name__ == "__main__":
