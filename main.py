@@ -41,9 +41,7 @@ def load_config(config_path="config.yaml"):
 
 
 def fetch_rust_dependencies(package_name, base_url):
-    """
-    Получение прямых зависимостей пакета Rust через API crates.io (Этап 2).
-    """
+    """Получение прямых зависимостей пакета Rust через API crates.io."""
     base_url = base_url.rstrip("/")
     url = f"{base_url}/{package_name}"
 
@@ -55,22 +53,13 @@ def fetch_rust_dependencies(package_name, base_url):
     try:
         with urllib.request.urlopen(req) as response:
             data = json.loads(response.read().decode("utf-8"))
-    except urllib.error.HTTPError as e:
-        print(f"Ошибка HTTP при запросе к реестру для пакета '{package_name}': {e.code}", file=sys.stderr)
-        return []
-    except urllib.error.URLError as e:
-        print(f"Ошибка сети при подключении к '{url}': {e.reason}", file=sys.stderr)
-        return []
-    except json.JSONDecodeError:
-        print("Ошибка: Не удалось разобрать JSON-ответ от сервера.", file=sys.stderr)
+    except Exception:
         return []
 
     versions = data.get("versions", [])
     if not versions:
-        print(f"Предупреждение: У пакета '{package_name}' не найдено версий.")
         return []
 
-    # Берем первую стабильную или доступную версию
     latest_version = None
     for v in versions:
         if not v.get("yanked", False):
@@ -91,8 +80,7 @@ def fetch_rust_dependencies(package_name, base_url):
     try:
         with urllib.request.urlopen(req_deps) as response:
             deps_data = json.loads(response.read().decode("utf-8"))
-    except Exception as e:
-        print(f"Ошибка при получении зависимостей версии {latest_version}: {e}", file=sys.stderr)
+    except Exception:
         return []
 
     dependencies = []
@@ -104,6 +92,66 @@ def fetch_rust_dependencies(package_name, base_url):
                 dependencies.append(dep_name)
 
     return dependencies
+
+
+def load_test_graph(file_path):
+    """Загрузка графа из тестового файла (пары вершин, например, A B)."""
+    graph = {}
+    if not os.path.exists(file_path):
+        print(f"Ошибка: Тестовый файл графа '{file_path}' не найден.", file=sys.stderr)
+        return graph
+
+    with open(file_path, "r", encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+            parts = line.split()
+            if len(parts) >= 2:
+                u, v = parts[0], parts[1]
+                graph.setdefault(u, []).append(v)
+    return graph
+
+
+def build_dependency_graph(start_package, base_url, test_mode, test_repo_path):
+    """Построение полного транзитивного графа зависимостей с помощью DFS (Этап 3)."""
+    graph = {}
+
+    if test_mode:
+        print(f"Загрузка графа из тестового файла: {test_repo_path}")
+        raw_graph = load_test_graph(test_repo_path)
+        visited = set()
+
+        def dfs_test(node):
+            if node in visited:
+                return
+            visited.add(node)
+            neighbors = raw_graph.get(node, [])
+            graph[node] = neighbors
+            for neighbor in neighbors:
+                dfs_test(neighbor)
+
+        if start_package in raw_graph or any(start_package in v_list for v_list in raw_graph.values()):
+            dfs_test(start_package)
+        else:
+            print(f"Предупреждение: Корневой узел '{start_package}' не найден в тестовом графе.")
+
+    else:
+        visited = set()
+
+        def dfs_crates(package):
+            if package in visited:
+                return
+            visited.add(package)
+            print(f"Запрос зависимостей для: {package}")
+            deps = fetch_rust_dependencies(package, base_url)
+            graph[package] = deps
+            for dep in deps:
+                dfs_crates(dep)
+
+        dfs_crates(start_package)
+
+    return graph
 
 
 def main():
@@ -120,16 +168,15 @@ def main():
 
     package_name = config["package_name"]
     repo_url = config["repository_url"]
+    test_mode = config["test_mode"]
+    test_repo_path = config["test_repo_path"]
 
-    print(f"Сбор прямых зависимостей для пакета '{package_name}' (Этап 2)...")
-    dependencies = fetch_rust_dependencies(package_name, repo_url)
+    print(f"Построение графа зависимостей для '{package_name}' (Этап 3, test_mode={test_mode})...")
+    graph = build_dependency_graph(package_name, repo_url, test_mode, test_repo_path)
 
-    print(f"\nПрямые зависимости пакета '{package_name}':")
-    if dependencies:
-        for dep in dependencies:
-            print(f" - {dep}")
-    else:
-        print(" (Зависимости не найдены или произошла ошибка при запросе)")
+    print("\nПолученный граф зависимостей (список смежности):")
+    for node, deps in graph.items():
+        print(f" {node} -> {deps}")
 
 
 if __name__ == "__main__":
