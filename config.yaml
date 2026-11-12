@@ -1,0 +1,6 @@
+package_name: "serde"
+repository_url: "https://crates.io/api/v1/crates"
+test_mode: false
+test_repo_path: "test_graph.txt"
+output_image: "graph.png"
+ascii_tree: true
